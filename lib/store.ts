@@ -40,33 +40,12 @@ export async function writeWithRetry(
 
 // ---------- GitHub ----------
 
-const TREE_DEPTH = 4; // פרויקטים/<project>/שיחות/<file>.md
+const BLOB_BATCH = 80; // blobs per GraphQL request
 
-function treeFragment(depth: number): string {
-  const blob = "... on Blob { oid text isTruncated }";
-  if (depth === 0) return `entries { name type object { ${blob} } }`;
-  return `entries { name type object { ${blob} ... on Tree { ${treeFragment(depth - 1)} } } }`;
-}
+// Blob contents never change for a given sha, so warm instances reuse them.
+const blobCache = new Map<string, string>();
 
-const SNAPSHOT_QUERY = `query($owner: String!, $name: String!, $ref: String!) {
-  repository(owner: $owner, name: $name) {
-    ref(qualifiedName: $ref) {
-      target {
-        ... on Commit {
-          oid
-          history(first: 10) { nodes { message committedDate } }
-          tree { ${treeFragment(TREE_DEPTH - 1)} }
-        }
-      }
-    }
-  }
-}`;
-
-interface GqlEntry {
-  name: string;
-  type: string;
-  object: { oid?: string; text?: string | null; isTruncated?: boolean; entries?: GqlEntry[] } | null;
-}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class GitHubStore implements Store {
   constructor(
@@ -103,42 +82,78 @@ export class GitHubStore implements Store {
     return (await res.json()) as T;
   }
 
-  async snapshot(): Promise<Snapshot> {
-    const data = await this.json<any>("POST", "https://api.github.com/graphql", {
-      query: SNAPSHOT_QUERY,
-      variables: { owner: this.owner, name: this.repo, ref: `refs/heads/${this.branch}` },
-    });
-    if (data.errors) throw new Error(`GitHub GraphQL error: ${JSON.stringify(data.errors)}`);
-    const target = data.data?.repository?.ref?.target;
-    if (!target) throw new Error(`Branch ${this.branch} not found in ${this.owner}/${this.repo}`);
-
-    const files = new Map<string, string>();
-    const truncated: { path: string; oid: string }[] = [];
-    const walk = (entries: GqlEntry[], prefix: string) => {
-      for (const e of entries) {
-        const p = prefix + e.name;
-        if (e.type === "tree" && e.object?.entries) {
-          if (e.name !== ".obsidian" && e.name !== ".git") walk(e.object.entries, p + "/");
-        } else if (e.type === "blob" && e.name.endsWith(".md") && e.object) {
-          if (e.object.isTruncated && e.object.oid) truncated.push({ path: p, oid: e.object.oid });
-          else files.set(p, e.object.text ?? "");
-        }
+  // GitHub occasionally answers 5xx or a GraphQL "Something went wrong"; retry those.
+  private async retry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (attempt >= 3) throw e;
+        await sleep(300 * 2 ** attempt);
       }
-    };
-    walk(target.tree.entries, "");
+    }
+  }
 
+  // Fetches blob texts by sha, many per GraphQL request.
+  private async fetchBlobs(shas: string[]): Promise<void> {
+    const missing = shas.filter((s) => !blobCache.has(s));
+    const batches: string[][] = [];
+    for (let i = 0; i < missing.length; i += BLOB_BATCH) batches.push(missing.slice(i, i + BLOB_BATCH));
     await Promise.all(
-      truncated.map(async ({ path: p, oid }) => {
-        const blob = await this.json<{ content: string }>("GET", `/repos/${this.owner}/${this.repo}/git/blobs/${oid}`);
-        files.set(p, Buffer.from(blob.content, "base64").toString("utf8"));
-      }),
+      batches.map((batch) =>
+        this.retry(async () => {
+          const fields = batch.map((sha, i) => `b${i}: object(oid: "${sha}") { ... on Blob { text isTruncated } }`);
+          const data = await this.json<any>("POST", "https://api.github.com/graphql", {
+            query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields.join(" ")} } }`,
+            variables: { owner: this.owner, name: this.repo },
+          });
+          if (data.errors) throw new Error(`GitHub GraphQL error: ${JSON.stringify(data.errors)}`);
+          for (const [i, sha] of batch.entries()) {
+            const blob = data.data.repository[`b${i}`];
+            if (blob && !blob.isTruncated) blobCache.set(sha, blob.text ?? "");
+          }
+        }),
+      ),
     );
+    // Large files come back truncated from GraphQL; read those through REST.
+    await Promise.all(
+      missing
+        .filter((s) => !blobCache.has(s))
+        .map((sha) =>
+          this.retry(async () => {
+            const blob = await this.json<{ content: string }>("GET", `/repos/${this.owner}/${this.repo}/git/blobs/${sha}`);
+            blobCache.set(sha, Buffer.from(blob.content, "base64").toString("utf8"));
+          }),
+        ),
+    );
+  }
 
-    const recent = (target.history.nodes as { message: string; committedDate: string }[]).map((n) => ({
-      message: n.message.split("\n")[0],
-      date: n.committedDate,
-    }));
-    return { head: target.oid, files, recent };
+  async snapshot(): Promise<Snapshot> {
+    const repo = `/repos/${this.owner}/${this.repo}`;
+    const commits = await this.retry(() =>
+      this.json<{ sha: string; commit: { message: string; committer: { date: string } } }[]>(
+        "GET",
+        `${repo}/commits?sha=${encodeURIComponent(this.branch)}&per_page=10`,
+      ),
+    );
+    if (!commits.length) throw new Error(`Branch ${this.branch} has no commits in ${this.owner}/${this.repo}`);
+    const head = commits[0].sha;
+
+    const tree = await this.retry(() =>
+      this.json<{ tree: { path: string; type: string; sha: string }[]; truncated: boolean }>(
+        "GET",
+        `${repo}/git/trees/${head}?recursive=1`,
+      ),
+    );
+    if (tree.truncated) throw new Error("The vault is too large for a single GitHub tree listing");
+    const blobs = tree.tree.filter(
+      (e) => e.type === "blob" && e.path.endsWith(".md") && !e.path.startsWith(".obsidian/"),
+    );
+    await this.fetchBlobs(blobs.map((b) => b.sha));
+
+    const files = new Map(blobs.map((b) => [b.path, blobCache.get(b.sha)!] as [string, string]));
+    const recent = commits.map((c) => ({ message: c.commit.message.split("\n")[0], date: c.commit.committer.date }));
+    return { head, files, recent };
   }
 
   async commit(parent: string, changes: FileChange[], message: string): Promise<string | null> {
