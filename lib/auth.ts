@@ -30,7 +30,7 @@ export function checkPassword(input: string): boolean {
   return timingSafeEqual(a, b) && !!process.env.ACCESS_PASSWORD;
 }
 
-type Kind = "client" | "code" | "access" | "refresh";
+type Kind = "client" | "code" | "access" | "refresh" | "session";
 
 export async function sign(kind: Kind, claims: Record<string, unknown>, ttl?: string | number): Promise<string> {
   let jwt = new SignJWT({ ...claims, kind }).setProtectedHeader({ alg: "HS256" }).setIssuedAt();

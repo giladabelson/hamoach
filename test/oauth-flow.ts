@@ -3,47 +3,13 @@
 // Usage: npx tsx test/oauth-flow.ts <vault-copy-dir>
 import assert from "node:assert/strict";
 import { randomBytes, createHash } from "node:crypto";
-import http from "node:http";
-import { readFileSync } from "node:fs";
-import mcpHandler from "../api/mcp.js";
-import oauthHandler from "../api/oauth.js";
+import { createLocalServer } from "./local-server.js";
 
 process.env.LOCAL_VAULT_DIR = process.argv[2];
 process.env.AUTH_SECRET = randomBytes(32).toString("hex");
 process.env.ACCESS_PASSWORD = "test-password-only";
 
-const routes: { source: string; destination: string }[] = JSON.parse(
-  readFileSync(new URL("../vercel.json", import.meta.url), "utf8"),
-).rewrites;
-
-function route(pathname: string): URL | null {
-  for (const r of routes) {
-    const re = new RegExp("^" + r.source.replace(/\./g, "\\.").replace("/:path*", "(/.*)?") + "$");
-    if (re.test(pathname)) return new URL(r.destination, "http://x");
-  }
-  return null;
-}
-
-const server = http.createServer(async (req, res: any) => {
-  const url = new URL(req.url!, "http://localhost");
-  const dest = route(url.pathname);
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  const raw = Buffer.concat(chunks).toString();
-  const type = String(req.headers["content-type"] ?? "");
-  (req as any).body = !raw
-    ? undefined
-    : type.includes("json")
-      ? JSON.parse(raw)
-      : Object.fromEntries(new URLSearchParams(raw));
-  (req as any).query = { ...Object.fromEntries(url.searchParams), ...Object.fromEntries(dest?.searchParams ?? []) };
-  res.status = (s: number) => ((res.statusCode = s), res);
-  res.json = (o: unknown) => (res.setHeader("Content-Type", "application/json"), res.end(JSON.stringify(o)), res);
-  res.send = (s: string) => (res.end(s), res);
-  res.redirect = (s: number, to: string) => (res.writeHead(s, { Location: to }), res.end(), res);
-  if (!dest) return res.status(404).send("no route");
-  return dest.pathname === "/api/mcp" ? mcpHandler(req as any, res) : oauthHandler(req as any, res);
-});
+const server = createLocalServer();
 
 async function main() {
   await new Promise<void>((r) => server.listen(0, r));
