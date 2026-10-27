@@ -41,7 +41,7 @@ async function main() {
 
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
   console.log("tools:", tools.join(", "));
-  assert.equal(tools.length, 11);
+  assert.equal(tools.length, 12);
 
   const call = async (name: string, args: Record<string, unknown> = {}, expectError = false) => {
     const r: any = await client.callTool({ name, arguments: args });
@@ -81,6 +81,10 @@ async function main() {
     const postponed = await taskByTitle("משימה עם תאריך");
     assert.equal(postponed.d.due, "2099-12-31");
     assert.equal(postponed.d.postponed_count, 1);
+
+    await call("set_calendar_event_id", { id: dated.d.id, calendar_event_id: "test-event-123" });
+    assert.equal((await taskByTitle("משימה עם תאריך")).d.calendar_event_id, "test-event-123");
+    assert.ok((await call("list_tasks", { filter: "open", project: PROJECT })).includes("test-event-123"));
 
     await call("complete_task", { id: undated.d.id });
     const done = await taskByTitle("משימה בלי תאריך");

@@ -192,7 +192,7 @@ function findTask(snap: Snapshot, id: string): { path: string; doc: Doc } {
 }
 
 const taskLine = (t: Task) =>
-  `- [${t.id}] ${t.title} | ${t.project}${t.due ? ` | יעד: ${t.due}` : ""}${t.status === "done" ? " | בוצע" : ""}${t.postponed_count ? ` | נדחתה ${t.postponed_count} פעמים` : ""}`;
+  `- [${t.id}] ${t.title} | ${t.project}${t.due ? ` | יעד: ${t.due}` : ""}${t.status === "done" ? " | בוצע" : ""}${t.postponed_count ? ` | נדחתה ${t.postponed_count} פעמים` : ""}${t.calendar_event_id ? ` | יומן: ${t.calendar_event_id}` : ""}`;
 
 // ---------- read operations ----------
 
@@ -353,6 +353,18 @@ export async function completeTask(store: Store, id: string): Promise<string> {
     doc.data.status = "done";
     doc.data.completed = today();
     return { message: `Complete task ${doc.data.id}`, result: `המשימה ${doc.data.id} (${doc.data.title}) סומנה כבוצעה.` };
+  });
+}
+
+export async function setCalendarEventId(store: Store, id: string, eventId: string): Promise<string> {
+  return editTask(store, id, (doc) => {
+    doc.data.calendar_event_id = eventId.trim() || null;
+    return {
+      message: `Link task ${doc.data.id} to calendar event`,
+      result: eventId.trim()
+        ? `המשימה ${doc.data.id} קושרה לאירוע ביומן ${eventId.trim()}.`
+        : `הקישור ליומן של המשימה ${doc.data.id} הוסר.`,
+    };
   });
 }
 

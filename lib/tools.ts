@@ -145,11 +145,26 @@ export function createServer(store: Store): McpServer {
   );
 
   server.registerTool(
+    "set_calendar_event_id",
+    {
+      title: "Link task to calendar event",
+      description:
+        "Store the Google Calendar event id on a task, so the calendar sync does not create duplicates. " +
+        "Call this only during calendar sync: right after creating a calendar event for a task, or after creating a task from a calendar event. Pass an empty string to remove the link.",
+      inputSchema: {
+        id: z.string().describe("Task id, e.g. t261026-k3x"),
+        calendar_event_id: z.string().describe("The Google Calendar event id."),
+      },
+    },
+    ({ id, calendar_event_id }) => run(() => vault.setCalendarEventId(store, id, calendar_event_id)),
+  );
+
+  server.registerTool(
     "list_tasks",
     {
       title: "List tasks",
       description:
-        "List tasks from the Brain with their ids. " +
+        "List tasks from the Brain with their ids (and calendar event ids when linked). " +
         "Call this when Gilad asks what tasks he has, what is overdue, what he finished, or before complete_task / postpone_task when you need an id. Read-only.",
       inputSchema: {
         filter: z
