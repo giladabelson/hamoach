@@ -41,7 +41,7 @@ async function main() {
 
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
   console.log("tools:", tools.join(", "));
-  assert.equal(tools.length, 12);
+  assert.equal(tools.length, 13);
 
   const call = async (name: string, args: Record<string, unknown> = {}, expectError = false) => {
     const r: any = await client.callTool({ name, arguments: args });

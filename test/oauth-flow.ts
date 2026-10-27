@@ -76,10 +76,10 @@ async function main() {
   const init = await mcp(tok.access_token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
   assert.equal(init.status, 200);
   const list = await (await mcp(tok.access_token, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert.equal(list.result.tools.length, 12);
+  assert.equal(list.result.tools.length, 13);
   const ov = await (await mcp(tok.access_token, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "get_overview", arguments: {} } })).json();
   assert.match(ov.result.content[0].text, /LaBot 2\.0/);
-  console.log("6. MCP initialize, tools/list (12), get_overview over HTTP: OK");
+  console.log("6. MCP initialize, tools/list (13), get_overview over HTTP: OK");
 
   // 7. Refresh, and a refresh token is not accepted as an access token
   const ref = await (await fetch(`${base}/token`, form({ grant_type: "refresh_token", refresh_token: tok.refresh_token }))).json();

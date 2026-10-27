@@ -2,6 +2,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Store } from "./store.js";
+import * as pipeline from "./pipeline.js";
 import * as vault from "./vault.js";
 
 const PROJECT_HINT =
@@ -44,7 +45,39 @@ export function createServer(store: Store): McpServer {
       inputSchema: { project: z.string().describe(PROJECT_HINT) },
       annotations: { readOnlyHint: true },
     },
-    ({ project }) => read((snap) => vault.projectDetails(snap, project)),
+    ({ project }) =>
+      run(async () => {
+        const snap = await store.snapshot();
+        const details = vault.projectDetails(snap, project);
+        if (vault.resolveProject(snap, project) !== pipeline.PIPELINE_PROJECT) return details;
+        const brief = await pipeline
+          .fetchPipeline(7)
+          .then(pipeline.formatPipelineBrief)
+          .catch(() => pipeline.PIPELINE_UNAVAILABLE);
+        return `${details}\n\n${brief}`;
+      }),
+  );
+
+  server.registerTool(
+    "get_pipeline",
+    {
+      title: "Outreach pipeline",
+      description:
+        "Read the live outreach pipeline of the 'כסף מהצד' project (leads, sent, replies, consents, outreach per day, who replied, breakdown by niche, run log). " +
+        "Call this when Gilad asks how the outreach / leads / פניות / צנרת is doing, who replied, how many agreed, or how a niche performs. Read-only.",
+      inputSchema: {
+        days: z.number().int().min(1).max(90).default(7).describe("How many recent days to show per day. Default 7."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    ({ days }) =>
+      run(async () => {
+        try {
+          return pipeline.formatPipeline(await pipeline.fetchPipeline(days));
+        } catch (e) {
+          throw new Error(`נתוני הצנרת לא זמינים כרגע (${(e as Error).message}).`);
+        }
+      }),
   );
 
   server.registerTool(
