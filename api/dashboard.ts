@@ -16,29 +16,31 @@ function cookie(req: VercelRequest): string {
 }
 
 const CSS = `
-:root{--bg:#f5f5f4;--card:#fff;--text:#1c1917;--muted:#78716c;--line:#e7e5e4;--accent:#2563eb;--late:#b91c1c;--late-bg:#fef2f2}
-@media (prefers-color-scheme:dark){:root{--bg:#1c1917;--card:#292524;--text:#f5f5f4;--muted:#a8a29e;--line:#44403c;--accent:#60a5fa;--late:#fca5a5;--late-bg:#3f1d1d}}
+:root{--bg:#eef2ff;--card:#fff;--text:#1e1b4b;--muted:#6366f1;--line:#c7d2fe;--accent:#4f46e5;--on-accent:#fff;--late:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#121027;--card:#1e1b3a;--text:#e0e7ff;--muted:#a5b4fc;--line:#312e81;--accent:#818cf8;--on-accent:#121027;--late:#f87171}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Arial,sans-serif;text-align:right}
 main{max-width:760px;margin:0 auto;padding:16px}
 h1{font-size:24px;margin:0}
-.date{color:var(--muted);font-size:14px;margin:2px 0 16px}
-h2{font-size:18px;margin:24px 0 8px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:8px}
-.late{background:var(--late-bg);border-color:var(--late)}
-.late .title{color:var(--late)}
-.title{font-weight:600}
-.meta{color:var(--muted);font-size:14px}
-.row{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-.label{color:var(--muted);font-size:14px}
+.muted{color:var(--muted);font-size:14px}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 8px;text-align:center}
+.tile b{display:block;font-size:28px;line-height:1.1}
+.tile.late b{color:var(--late)}
+.tabs input{position:absolute;opacity:0;pointer-events:none}
+.tabs label{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;margin:0 0 10px 4px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-weight:600;cursor:pointer}
+.tabs input:checked+label{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.tabs input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+.panel{display:none}
+#tab-tasks:checked~.p-tasks,#tab-projects:checked~.p-projects,#tab-updates:checked~.p-updates{display:block}
+.row{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:8px}
+.row.late{border-right:6px solid var(--late)}
+.row.late .t{color:var(--late)}
+.t{font-weight:600}
 .empty{color:var(--muted)}
-.group{font-weight:600;margin:12px 0 4px}
-ul{margin:0;padding:0;list-style:none}
-li{padding:8px 0;border-bottom:1px solid var(--line)}
-li:last-child{border-bottom:0}
-form{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;max-width:360px;margin:15vh auto 0}
-input{width:100%;font-size:18px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
-button{margin-top:12px;width:100%;font-size:18px;padding:10px;border:0;border-radius:8px;background:var(--accent);color:#fff}
+form{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;max-width:360px;margin:15vh auto 0}
+input[type=password]{width:100%;font-size:18px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
+button{margin-top:12px;width:100%;min-height:44px;font-size:18px;border:0;border-radius:8px;background:var(--accent);color:var(--on-accent)}
 .err{color:var(--late)}
 `;
 
@@ -47,55 +49,56 @@ const shell = (body: string) => `<!doctype html><html lang="he" dir="rtl"><head>
 <body><main>${body}</main></body></html>`;
 
 const loginPage = (error?: string) =>
-  shell(`<form method="post"><h1>המוח</h1><p class="meta">הקלד את הסיסמה.</p>
+  shell(`<form method="post"><h1>המוח</h1><p class="muted">הקלד את הסיסמה.</p>
 ${error ? `<p class="err">${esc(error)}</p>` : ""}
 <input type="password" name="password" autofocus autocomplete="current-password" required>
 <button type="submit">כניסה</button></form>`);
 
-function taskItem(t: Task, showProject: boolean): string {
-  const bits = [showProject ? esc(t.project) : "", t.due ? `יעד ${esc(t.due)}` : "", t.postponed_count ? `נדחתה ${t.postponed_count}` : ""];
-  return `<li><div class="title">${esc(t.title)}</div><div class="meta">${bits.filter(Boolean).join(" · ")}</div></li>`;
+const addDays = (day: string, n: number) => new Date(Date.parse(day) + n * 86400000).toISOString().slice(0, 10);
+
+function taskRow(t: Task, day: string): string {
+  const late = isOverdue(t, day);
+  const bits = [esc(t.project), t.due ? `יעד ${esc(t.due)}` : "בלי תאריך", t.postponed_count ? `נדחתה ${t.postponed_count}` : ""];
+  return `<div class="row${late ? " late" : ""}"><div class="t">${esc(t.title)}</div><div class="muted">${bits.filter(Boolean).join(" · ")}</div></div>`;
 }
 
 export function renderDashboard(snap: Snapshot): string {
   const day = today();
+  const weekEnd = addDays(day, 7);
   const open = listAllTasks(snap).filter((t) => t.status === "open");
   const overdue = open.filter((t) => isOverdue(t, day));
+  const thisWeek = open.filter((t) => t.due && t.due >= day && t.due <= weekEnd);
+  // Overdue first, then by due date, undated last (listAllTasks already sorts by due).
+  const ordered = [...overdue, ...open.filter((t) => t.due && !isOverdue(t, day)), ...open.filter((t) => !t.due)];
 
-  const lateHtml = overdue.length
-    ? `<div class="card late"><ul>${overdue.map((t) => taskItem(t, true)).join("")}</ul></div>`
-    : `<p class="empty">אין משימות באיחור.</p>`;
+  const tasksHtml = ordered.length ? ordered.map((t) => taskRow(t, day)).join("") : `<p class="empty">אין משימות פתוחות.</p>`;
 
-  const groups = new Map<string, Task[]>();
-  for (const t of open) groups.set(t.project, [...(groups.get(t.project) ?? []), t]);
-  const openHtml = groups.size
-    ? [...groups]
-        .map(([p, list]) => `<div class="card"><div class="group">${esc(p)} (${list.length})</div><ul>${list.map((t) => taskItem(t, false)).join("")}</ul></div>`)
-        .join("")
-    : `<p class="empty">אין משימות פתוחות.</p>`;
-
-  const projects = listProjects(snap)
+  const projectsHtml = listProjects(snap)
     .map((p) => readStatus(snap, p))
-    .sort((a, b) => b.updated.localeCompare(a.updated));
-  const projectsHtml = projects
+    .sort((a, b) => b.updated.localeCompare(a.updated))
     .map(
-      (s) => `<div class="card"><div class="row"><span class="title">${esc(s.project)}</span><span class="meta">${esc(s.updated.replace("T", " "))}</span></div>
-<div><span class="label">מצב: </span>${s.state ? esc(s.state) : `<span class="empty">עוד אין</span>`}</div>
-<div><span class="label">הצעד הבא: </span>${s.next_step ? esc(s.next_step) : `<span class="empty">עוד אין</span>`}</div></div>`,
+      (s) => `<div class="row"><div class="t">${esc(s.project)}</div>
+<div>${s.state ? esc(s.state) : `<span class="empty">עוד אין סטטוס</span>`}</div>
+<div class="muted">הצעד הבא: ${s.next_step ? esc(s.next_step) : "עוד אין"}</div></div>`,
     )
     .join("");
 
-  const recentHtml = snap.recent.length
-    ? `<div class="card"><ul>${snap.recent
-        .map((c) => `<li><div>${esc(c.message)}</div><div class="meta">${esc(new Date(c.date).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", dateStyle: "short", timeStyle: "short" }))}</div></li>`)
-        .join("")}</ul></div>`
+  const updatesHtml = snap.recent.length
+    ? snap.recent
+        .map((c) => `<div class="row">${esc(c.message)}<div class="muted">${esc(new Date(c.date).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem", dateStyle: "short", timeStyle: "short" }))}</div></div>`)
+        .join("")
     : `<p class="empty">אין עדכונים.</p>`;
 
-  return shell(`<h1>המוח</h1><p class="date">${esc(day)}</p>
-<h2>באיחור (${overdue.length})</h2>${lateHtml}
-<h2>משימות פתוחות (${open.length})</h2>${openHtml}
-<h2>פרויקטים</h2>${projectsHtml}
-<h2>עדכונים אחרונים</h2>${recentHtml}`);
+  return shell(`<h1>המוח</h1><div class="muted">${esc(day)}</div>
+<div class="tiles"><div class="tile late"><b>${overdue.length}</b>באיחור</div><div class="tile"><b>${thisWeek.length}</b>השבוע</div><div class="tile"><b>${open.length}</b>פתוחות</div></div>
+<div class="tabs">
+<input type="radio" name="tab" id="tab-tasks" checked><label for="tab-tasks">משימות</label>
+<input type="radio" name="tab" id="tab-projects"><label for="tab-projects">פרויקטים</label>
+<input type="radio" name="tab" id="tab-updates"><label for="tab-updates">עדכונים</label>
+<div class="panel p-tasks">${tasksHtml}</div>
+<div class="panel p-projects">${projectsHtml}</div>
+<div class="panel p-updates">${updatesHtml}</div>
+</div>`);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
