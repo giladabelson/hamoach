@@ -39,7 +39,7 @@ async function main() {
   console.log("2. get_project has unchanged project data + מצב הצנרת: OK");
 
   // 3. other projects get no pipeline section
-  const other = await call("get_project", { project: "LaBot 2.0" });
+  const other = await call("get_project", { project: "Demo Project" });
   assert.ok(!other.text.includes("מצב הצנרת"));
   console.log("3. other projects unaffected: OK");
 

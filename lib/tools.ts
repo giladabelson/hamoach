@@ -6,7 +6,7 @@ import * as pipeline from "./pipeline.js";
 import * as vault from "./vault.js";
 
 const PROJECT_HINT =
-  "Project name exactly as it appears in the Brain (e.g. 'LaBot 2.0', 'חיפוש עבודה'). If unsure, call get_overview first to see the list.";
+  "Project name exactly as it appears in the Brain (e.g. 'My Project', 'חיפוש עבודה'). If unsure, call get_overview first to see the list.";
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD");
 
 export function createServer(store: Store): McpServer {

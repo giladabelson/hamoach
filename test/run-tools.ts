@@ -110,7 +110,7 @@ async function main() {
     assert.ok(proj.includes("בבדיקה") && proj.includes("משימה מתוך שיחה") && proj.includes("שיחת בדיקה"));
 
     const ov = await call("get_overview");
-    assert.ok(ov.includes(PROJECT) && ov.includes("LaBot 2.0"));
+    assert.ok(ov.includes(PROJECT) && ov.includes("Demo Project"));
 
     const found = await call("search", { query: "החלטת בדיקה" });
     assert.ok(found.includes("החלטות.md"));

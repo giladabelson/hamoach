@@ -68,7 +68,7 @@ npx tsx test/oauth-flow.ts <vault-dir>      # 8-step OAuth + MCP over HTTP flow
 npx tsx test/pipeline.ts <vault-dir> <n>    # get_pipeline (needs SUPABASE_* env)
 ```
 
-The tool and OAuth suites expect the vault to contain a project named `LaBot 2.0`.
+The tool and OAuth suites expect the vault to contain a project named `Demo Project`.
 
 ## How it was built
 
