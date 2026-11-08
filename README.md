@@ -1,28 +1,75 @@
-# hamoach-connector
+# hamoach
 
-Remote MCP server ("המוח") on Vercel. Reads and writes the private `hamoach-vault` repo through the GitHub API (one commit per write).
+A remote MCP server that gives every Claude chat one shared memory of tasks, decisions and project status, stored as Markdown in a private GitHub repo.
 
-## Endpoints
-- `/mcp` - MCP, Streamable HTTP, stateless. Bearer token required.
-- `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token` - single-user OAuth (PKCE + dynamic client registration). The authorize page asks for `ACCESS_PASSWORD`.
+## What it does
 
-## Environment variables (Vercel, never in the repo)
-| Name | Value |
+- Exposes 13 MCP tools over Streamable HTTP: `get_overview`, `get_project`, `list_tasks`, `search`, `add_task`, `complete_task`, `postpone_task`, `update_status`, `add_decision`, `log_chat_summary`, `save_meeting`, `set_calendar_event_id`, `get_pipeline`.
+- Any Claude chat (web, desktop, phone) can read where a project stands and continue from there, and write back decisions, tasks and chat summaries.
+- Every write is a single commit to the vault repo, so the full history is versioned and the vault stays readable in Obsidian.
+- Single-user OAuth (PKCE + dynamic client registration) so it can be added as a custom connector in Claude.
+- A password-protected dashboard page with overdue / this-week / open task counters and per-project status.
+- Optional read-only `get_pipeline` tool that summarizes an outreach pipeline from a Supabase RPC (counts only, no contact details).
+
+The vault itself (the personal notes) is a separate private repo and is not part of this code.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  C[Claude chats] -- MCP over HTTPS + Bearer token --> M[/api/mcp on Vercel/]
+  C -- OAuth PKCE --> O[/api/oauth/]
+  B[Browser] --> D[/api/dashboard/]
+  M & D --> V[lib/vault.ts: Markdown + YAML model]
+  V --> S[lib/store.ts: GitHub REST + GraphQL]
+  S --> G[(Private vault repo)]
+  M --> P[lib/pipeline.ts] --> SB[(Supabase RPC, read-only)]
+```
+
+- `api/mcp.ts`: stateless MCP endpoint.
+- `api/oauth.ts`, `lib/auth.ts`: OAuth metadata, registration, authorize, token. Tokens are signed JWTs; changing the access password revokes all of them.
+- `lib/vault.ts`: the data model (status files, decision logs, task files, chat summaries, meetings).
+- `lib/store.ts`: reads the vault with one tree listing plus batched blob fetches with retries; writes one commit per change. A local filesystem store is used for tests.
+- `api/dashboard.ts`: server-rendered dashboard behind a signed cookie.
+
+## Stack
+
+TypeScript, Node 22, Vercel serverless functions, Model Context Protocol SDK, jose (JWT), zod, GitHub REST/GraphQL API, Supabase (optional).
+
+## Run locally
+
+```
+npm install
+cp .env.example .env    # fill in the values
+npx tsx test/local-server.ts <path-to-a-vault-folder> [port]
+```
+
+Environment variables (set in Vercel, never committed):
+
+| Name | Purpose |
 | --- | --- |
-| `GITHUB_TOKEN` | Fine-grained token, only `hamoach-vault`, Contents: Read and write |
-| `GITHUB_OWNER` | GitHub user name |
-| `GITHUB_REPO` | `hamoach-vault` |
-| `GITHUB_BRANCH` | `main` (optional) |
-| `ACCESS_PASSWORD` | Personal password. Changing it disconnects every client. |
-| `AUTH_SECRET` | Long random string |
-| `SUPABASE_URL` | Outreach project URL (for `get_pipeline`) |
-| `SUPABASE_PUBLISHABLE_KEY` | Publishable key of the outreach project. Only calls `pipeline_summary`, which is read-only and returns no contact details. |
+| `GITHUB_TOKEN` | Fine-grained token scoped to the vault repo only, Contents read/write |
+| `GITHUB_OWNER` | Owner of the vault repo |
+| `GITHUB_REPO` | Vault repo name |
+| `GITHUB_BRANCH` | Optional, defaults to `main` |
+| `ACCESS_PASSWORD` | Login password for OAuth and the dashboard |
+| `AUTH_SECRET` | Long random string used to sign tokens |
+| `PUBLIC_URL` | Optional, public base URL of the deployment |
+| `SUPABASE_URL` | Optional, for `get_pipeline` |
+| `SUPABASE_PUBLISHABLE_KEY` | Optional, for `get_pipeline` |
 
 ## Tests
+
 ```
 npm run typecheck
-npx tsx test/run-tools.ts <copy-of-vault-dir>     # every tool, local folder
-npx tsx test/run-tools.ts --github                # every tool, real repo (test project, cleaned up)
-npx tsx test/oauth-flow.ts <copy-of-vault-dir>    # login flow + MCP over HTTP
-npx tsx test/pipeline.ts <copy-of-vault-dir> <leads-count>   # get_pipeline (needs SUPABASE_* env)
+npx tsx test/run-tools.ts <vault-dir>       # every tool against a local folder, cleans up after itself
+npx tsx test/run-tools.ts --github          # same against the real repo, using a throwaway test project
+npx tsx test/oauth-flow.ts <vault-dir>      # 8-step OAuth + MCP over HTTP flow
+npx tsx test/pipeline.ts <vault-dir> <n>    # get_pipeline (needs SUPABASE_* env)
 ```
+
+The tool and OAuth suites expect the vault to contain a project named `LaBot 2.0`.
+
+## How it was built
+
+Built by directing AI coding agents (Claude Code); I own the spec, architecture, testing and deployment.
